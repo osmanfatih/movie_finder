@@ -1,0 +1,5 @@
+*.txt
+*.yaml
+*.toml
+*.egg-info/
+*.pyc
