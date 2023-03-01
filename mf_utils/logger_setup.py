@@ -3,9 +3,7 @@ import logging
 from pathlib import Path
 
 
-def get_logger(
-    logger_name: str = "mf_logger", filename: str = "movie_finder_logs.txt"
-) -> logging.Logger:
+def get_logger(logger_name: str = "mf_logger", filename: str = "movie_finder_logs.txt") -> logging.Logger:
     """
     Function for getting a logger object using a logger name from anywhere
 
@@ -18,9 +16,7 @@ def get_logger(
     """
     logging_dir = Path(os.environ.get("MOVIE_FINDER_LOG", "."))
 
-    log_formatter = logging.Formatter(
-        fmt="%(asctime)s - %(levelname)s - %(module)s - %(message)s"
-    )
+    log_formatter = logging.Formatter(fmt="%(asctime)s - %(levelname)s - %(module)s - %(message)s")
 
     log_writer = logging.FileHandler(logging_dir / filename)
     log_writer.setFormatter(log_formatter)
