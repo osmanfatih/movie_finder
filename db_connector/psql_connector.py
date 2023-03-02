@@ -3,7 +3,7 @@ import abc
 import os
 import supabase
 
-from typing import Dict, Any
+from typing import Dict, Any, List
 
 from mf_representations.enums import RecordType
 from db_connector.connector import ConnectorBase
@@ -47,6 +47,11 @@ class SupaTmdbConnector(SupaConnector):
     def TABLE_NAME(cls) -> str:
         return "mf_main"
 
+    @property
+    def COLUMN_NAMES(cls) -> List[str]:
+        column_list = ["tmdb_id", "title", "type", "popularity"]
+        return column_list
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -62,18 +67,28 @@ class SupaTmdbConnector(SupaConnector):
 
     def insert_tmdb_daily_export_movies(self) -> bool:
         for item in next(self.tmdb_connector.get_all_movie_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.MOVIE}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.MOVIE, "popularity": item["popularity"]}
             assert self._insert_tmdb_data(data_dict), f"Failed to insert the data: {data_dict}"
 
     def insert_tmdb_daily_export_series(self) -> bool:
         for item in next(self.tmdb_connector.get_all_series_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.SERIES}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.SERIES, "popularity": item["popularity"]}
             assert self._insert_tmdb_data(data_dict)
 
     def insert_tmdb_daily_export_artist(self) -> bool:
         for item in next(self.tmdb_connector.get_all_artist_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.ARTIST}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.ARTIST, "popularity": item["popularity"]}
             assert self._insert_tmdb_data(data_dict)
+
+    def insert_all_tmdb_data(self) -> bool:
+        assert self.insert_tmdb_daily_export_movies(), "Daily export movie insert error"
+        assert self.insert_tmdb_daily_export_artist(), "Daily export series insert error"
+        assert self.insert_tmdb_daily_export_artist(), "Daily export artists insert error"
+
+    def update_tmdb_record(self, data_dict: Dict[str, Any]) -> bool:
+        if not all(key in self.COLUMN_NAMES for key in data_dict.keys()):
+            raise ValueError(f"Main table updates can only be done on the following columns: {self.COLUMN_NAMES}")
+        return self._update_tmdb_data(data_dict)
 
 
 if __name__ == "__main__":
