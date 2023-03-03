@@ -13,27 +13,7 @@ from typing import List, Dict, Any, Union
 from db_connector.connector import ConnectorBase
 from mf_representations.records import MovieRecord, SeriesRecord, ArtistRecord
 from mf_representations.enums import RecordType
-
-
-class TmdbImageConfig:
-    def __init__(self, config) -> None:
-        self._image_config = {
-            "base_url": config["images"]["base_url"],
-            "secure_base_url": config["images"]["secure_base_url"],
-            "backdrop_size_list": config["images"]["backdrop_sizes"],
-            "poster_size_list": config["images"]["poster_sizes"],
-            "profile_size_list": config["images"]["profile_sizes"],
-        }
-        self.base_url = self._image_config.get("base_url")
-        self.secure_base_url = self._image_config.get("secure_base_url")
-        self.backdrop_size_list = self._image_config.get("backdrop_size_list")
-        self.poster_size_list = self._image_config.get("poster_size_list")
-        self.profile_size_list = self._image_config.get("profile_size_list")
-
-    def _get_image_url(self, url_path: str, image_size: str = "original", secure: bool = False) -> str:
-        if not secure:
-            return self.base_url + image_size + url_path
-        return self.secure_base_url + image_size + url_path
+from mf_representations.configs import TmdbImageConfig
 
 
 class TmdbConnector(ConnectorBase):
@@ -56,7 +36,9 @@ class TmdbConnector(ConnectorBase):
     def _make_request(self, url):
         response = requests.get(url)
         if response.status_code != 200:
-            raise Exception(f"Request failed with status code {response.status_code}: {response.text}")
+            raise Exception(
+                f"Request failed with status code {response.status_code}: {response.text}"
+            )
         return response.json()
 
     def _get_tmdb_config(self) -> None:
@@ -82,38 +64,62 @@ class TmdbConnector(ConnectorBase):
 
     def get_all_movie_id_titles(self, batch_size: Union[None, int] = None) -> Dict[str, Any]:
         if batch_size is None:
-            obj = next(self._get_tmdb_daily_export(type="movie"))
-            yield {"tmdb_id": obj["id"], "title": obj["original_title"], "popularity": obj["popularity"]}
-
+            for obj in self._get_tmdb_daily_export(type="movie"):
+                yield {
+                    "tmdb_id": obj["id"],
+                    "title": obj["original_title"],
+                    "popularity": obj["popularity"],
+                }
+        else:
             batched_movie_list = []
-        for obj in next(self._get_tmdb_daily_export(type="movie")):
-            batch_data = {"tmdb_id": obj["id"], "title": obj["original_title"], "popularity": obj["popularity"]}
-            batched_movie_list.append(batch_data)
-            if len(batched_movie_list) == batch_size:
-                yield batched_movie_list
-                batched_movie_list = []
+            for obj in self._get_tmdb_daily_export(type="movie"):
+                batch_data = {
+                    "tmdb_id": obj["id"],
+                    "title": obj["original_title"],
+                    "popularity": obj["popularity"],
+                }
+                batched_movie_list.append(batch_data)
+                if len(batched_movie_list) == batch_size:
+                    yield batched_movie_list
+                    batched_movie_list = []
 
-    def get_all_series_id_titles(self, batch_size: Union[None, int] = None) -> Union[List, Dict[str, Any]]:
+    def get_all_series_id_titles(
+        self, batch_size: Union[None, int] = None
+    ) -> Union[List, Dict[str, Any]]:
         if batch_size is None:
             obj = next(self._get_tmdb_daily_export(type="tv_series"))
-            yield {"tmdb_id": obj["id"], "title": obj["original_name"], "popularity": obj["popularity"]}
+            yield {
+                "tmdb_id": obj["id"],
+                "title": obj["original_name"],
+                "popularity": obj["popularity"],
+            }
 
             batched_movie_list = []
         for obj in next(self._get_tmdb_daily_export(type="tv_series")):
-            batch_data = {"tmdb_id": obj["id"], "title": obj["original_name"], "popularity": obj["popularity"]}
+            batch_data = {
+                "tmdb_id": obj["id"],
+                "title": obj["original_name"],
+                "popularity": obj["popularity"],
+            }
             batched_movie_list.append(batch_data)
             if len(batched_movie_list) == batch_size:
                 yield batched_movie_list
                 batched_movie_list = []
 
-    def get_all_artist_id_titles(self, batch_size: Union[None, int] = None) -> Union[List, Dict[str, Any]]:
+    def get_all_artist_id_titles(
+        self, batch_size: Union[None, int] = None
+    ) -> Union[List, Dict[str, Any]]:
         if batch_size is None:
             obj = next(self._get_tmdb_daily_export(type="person"))
             yield {"tmdb_id": obj["id"], "title": obj["name"], "popularity": obj["popularity"]}
 
             batched_movie_list = []
         for obj in next(self._get_tmdb_daily_export(type="person")):
-            batch_data = {"tmdb_id": obj["id"], "title": obj["name"], "popularity": obj["popularity"]}
+            batch_data = {
+                "tmdb_id": obj["id"],
+                "title": obj["name"],
+                "popularity": obj["popularity"],
+            }
             batched_movie_list.append(batch_data)
             if len(batched_movie_list) == batch_size:
                 yield batched_movie_list
@@ -162,7 +168,12 @@ class TmdbConnector(ConnectorBase):
         while len(movies < num_records):
             response = requests.get(url + str(page))
             data = response.json()
-            movies.extend([self._generate_movie_record_from_response(movie_data) for movie_data in data["results"]])
+            movies.extend(
+                [
+                    self._generate_movie_record_from_response(movie_data)
+                    for movie_data in data["results"]
+                ]
+            )
             if data["page"] == data["total_pages"]:
                 break
             page += 1

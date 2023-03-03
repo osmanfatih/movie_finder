@@ -22,4 +22,6 @@ class SupaMainData:
     popularity: float = None
 
     def _to_dict(self):
-        return {key: value for key, value in asdict(self).items() if value is not None}
+        dict_to_return = {key: value for key, value in asdict(self).items() if value is not None}
+        dict_to_return["type"] = dict_to_return["type"].name
+        return dict_to_return
