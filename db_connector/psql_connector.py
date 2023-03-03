@@ -3,11 +3,15 @@ import abc
 import os
 import supabase
 
-from typing import Dict, Any
+from dataclasses import dataclass, asdict
+from typing import Dict, Any, List
 
-from mf_representations.enums import RecordType
+from mf_representations.enums import RecordType, SupaMainData
 from db_connector.connector import ConnectorBase
 from db_connector.tmdb_connector import TmdbConnector
+from mf_utils import logger_setup
+
+logger = logger_setup.get_logger("supa_main_logger", "main_data_update_logs.txt")
 
 
 class SupaConnector(ConnectorBase):
@@ -47,6 +51,11 @@ class SupaTmdbConnector(SupaConnector):
     def TABLE_NAME(cls) -> str:
         return "mf_main"
 
+    @property
+    def COLUMN_NAMES(cls) -> List[str]:
+        column_list = ["tmdb_id", "title", "type", "popularity"]
+        return column_list
+
     def __init__(self) -> None:
         super().__init__()
 
@@ -60,22 +69,40 @@ class SupaTmdbConnector(SupaConnector):
         response = self.client.table(self.TABLE_NAME).update(data_dict).eq("unique_id", data_dict.pop("unique_id")).execute()
         return len(response.data) > 0
 
+    def _check_data_exists(self, data_dict: Dict[str, Any]) -> bool:
+        pass
+
     def insert_tmdb_daily_export_movies(self) -> bool:
         for item in next(self.tmdb_connector.get_all_movie_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.MOVIE}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.MOVIE, "popularity": item["popularity"]}
+            # TODO Make sure that an existing data from the same type not being inserted
+            type_response = self.client.table(self.TABLE_NAME).select("type").eq("tmdb_id", data_dict["tmdb_id"])
+            if len(type_response.data) > 0 and type_response.json().get("type") == RecordType.MOVIE:
+                logger.log(f"Tried to insert existing data: {data_dict}")
+                continue
             assert self._insert_tmdb_data(data_dict), f"Failed to insert the data: {data_dict}"
 
     def insert_tmdb_daily_export_series(self) -> bool:
         for item in next(self.tmdb_connector.get_all_series_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.SERIES}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.SERIES, "popularity": item["popularity"]}
             assert self._insert_tmdb_data(data_dict)
 
     def insert_tmdb_daily_export_artist(self) -> bool:
         for item in next(self.tmdb_connector.get_all_artist_id_titles()):
-            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.ARTIST}
+            data_dict = {"tmdb_id": int(item["tmdb_id"]), "title": item["title"], "type": RecordType.ARTIST, "popularity": item["popularity"]}
             assert self._insert_tmdb_data(data_dict)
+
+    def insert_all_tmdb_data(self) -> bool:
+        assert self.insert_tmdb_daily_export_movies(), "Daily export movie insert error"
+        assert self.insert_tmdb_daily_export_artist(), "Daily export series insert error"
+        assert self.insert_tmdb_daily_export_artist(), "Daily export artists insert error"
+
+    def update_tmdb_record(self, data_dict: Dict[str, Any]) -> bool:
+        if not all(key in self.COLUMN_NAMES for key in data_dict.keys()):
+            raise ValueError(f"Main table updates can only be done on the following columns: {self.COLUMN_NAMES}")
+        return self._update_tmdb_data(data_dict)
 
 
 if __name__ == "__main__":
-    connector = SupaConnector()
-    connector.insert_tmdb_movies()
+    data = SupaMainData(tmdb_id=123, type=RecordType.MOVIE)
+    ipdb.set_trace()
