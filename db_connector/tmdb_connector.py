@@ -6,7 +6,9 @@ import requests
 import os
 import jsonlines
 import tempfile
+import pandas as pd
 
+from pathlib import Path
 from datetime import date
 from typing import List, Dict, Any, Union
 
@@ -14,6 +16,88 @@ from db_connector.connector import ConnectorBase
 from mf_representations.records import MovieRecord, SeriesRecord, ArtistRecord
 from mf_representations.enums import RecordType
 from mf_representations.configs import TmdbImageConfig
+
+
+class TmdbExporter:
+    def _get_tmdb_daily_export(self, type: str) -> Path:
+        files_base_url = "http://files.tmdb.org/p/exports/"
+        today_date = date.today().strftime("%d_%m_%Y")
+        export_url = f"{files_base_url}{type}_ids_{today_date}.json.gz"
+        req_json_file = requests.get(export_url)
+        req_json_file.raise_for_status()
+
+        written_file_name = Path(__file__).parent.resolve() / f"{type}_title_id_list.jsonl"
+        with open(written_file_name, "w") as f:
+            f.write(req_json_file.content)
+        return written_file_name
+
+    def export_all_movie_id_titles(self) -> pd.DataFrame:
+        data = []
+        with open(self._get_tmdb_daily_export("movie"), "r") as f:
+            for line in f.readlines():
+                try:
+                    obj = json.loads(line)
+                    data.append(
+                        {
+                            "tmdb_id": obj["id"],
+                            "title": obj["original_title"],
+                            "popularity": obj["popularity"],
+                            "type": RecordType.MOVIE.name,
+                        }
+                    )
+                except:
+                    continue
+        return pd.DataFrame(data)
+
+    def export_all_series_id_titles(self) -> pd.DataFrame:
+        data = []
+        with open(self._get_tmdb_daily_export("tv_series"), "r") as f:
+            for line in f.readlines():
+                try:
+                    obj = json.loads(line)
+                    data.append(
+                        {
+                            "tmdb_id": obj["id"],
+                            "title": obj["original_name"],
+                            "popularity": obj["popularity"],
+                            "type": RecordType.SERIES.name,
+                        }
+                    )
+                except:
+                    continue
+        return pd.DataFrame(data)
+
+    def export_all_artist_id_titles(self) -> pd.DataFrame:
+        data = []
+        with open(self._get_tmdb_daily_export("person"), "r") as f:
+            for line in f.readlines():
+                try:
+                    obj = json.loads(line)
+                    data.append(
+                        {
+                            "tmdb_id": obj["id"],
+                            "title": obj["name"],
+                            "popularity": obj["popularity"],
+                            "type": RecordType.ARTIST.name,
+                        }
+                    )
+                except:
+                    continue
+        return pd.DataFrame(data)
+
+    def export_all_id_titles(self) -> None:
+        df = pd.concat(
+            [
+                self.export_all_movie_id_titles(),
+                self.export_all_series_id_titles(),
+                self.export_all_artist_id_titles(),
+            ]
+        )
+        df.drop(index=df[df.title.apply(len) == 0].index, inplace=True)
+        df.reset_index(inplace=True)
+        df.drop(columns=["index"], inplace=True)
+        all_export_file_name = Path(__file__).parent.resolve() / "all_id_titles.csv"
+        df.to_csv(all_export_file_name, sep="|", index_label="id", float_format="%g")
 
 
 class TmdbConnector(ConnectorBase):
@@ -35,10 +119,7 @@ class TmdbConnector(ConnectorBase):
 
     def _make_request(self, url):
         response = requests.get(url)
-        if response.status_code != 200:
-            raise Exception(
-                f"Request failed with status code {response.status_code}: {response.text}"
-            )
+        response.raise_for_status()
         return response.json()
 
     def _get_tmdb_config(self) -> None:
@@ -47,104 +128,67 @@ class TmdbConnector(ConnectorBase):
         return config_data
 
     def _get_record_details(self, record_type: RecordType, tmdb_id: int):
-        url = f"{self.base_url}/{record_type}/{tmdb_id}?api_key={self.api_key}"
+        url = f"{self.URL_BASE}/{record_type.value.lower()}/{tmdb_id}?api_key={self.AUTH_TOKEN}"
         data = self._make_request(url)
         return data
 
-    def _get_tmdb_daily_export(self, type: str) -> Dict[str, Any]:
-        files_base_url = "http://files.tmdb.org/p/exports/"
-        today_date = date.today().strftime("%d_%m_%Y")
-
-        export_url = f"{files_base_url}{type}_ids_{today_date}.json.gz"
-        req_json_file = requests.get(export_url)
-
-        for line in gzip.decompress(req_json_file.content).decode("utf-8").split("\n"):
-            obj = json.loads(line)
-            yield obj
-
-    def get_all_movie_id_titles(self, batch_size: Union[None, int] = None) -> Dict[str, Any]:
-        if batch_size is None:
-            for obj in self._get_tmdb_daily_export(type="movie"):
-                yield {
-                    "tmdb_id": obj["id"],
-                    "title": obj["original_title"],
-                    "popularity": obj["popularity"],
-                }
-        else:
-            batched_movie_list = []
-            for obj in self._get_tmdb_daily_export(type="movie"):
-                batch_data = {
-                    "tmdb_id": obj["id"],
-                    "title": obj["original_title"],
-                    "popularity": obj["popularity"],
-                }
-                batched_movie_list.append(batch_data)
-                if len(batched_movie_list) == batch_size:
-                    yield batched_movie_list
-                    batched_movie_list = []
-
-    def get_all_series_id_titles(
-        self, batch_size: Union[None, int] = None
-    ) -> Union[List, Dict[str, Any]]:
-        if batch_size is None:
-            obj = next(self._get_tmdb_daily_export(type="tv_series"))
-            yield {
-                "tmdb_id": obj["id"],
-                "title": obj["original_name"],
-                "popularity": obj["popularity"],
-            }
-
-            batched_movie_list = []
-        for obj in next(self._get_tmdb_daily_export(type="tv_series")):
-            batch_data = {
-                "tmdb_id": obj["id"],
-                "title": obj["original_name"],
-                "popularity": obj["popularity"],
-            }
-            batched_movie_list.append(batch_data)
-            if len(batched_movie_list) == batch_size:
-                yield batched_movie_list
-                batched_movie_list = []
-
-    def get_all_artist_id_titles(
-        self, batch_size: Union[None, int] = None
-    ) -> Union[List, Dict[str, Any]]:
-        if batch_size is None:
-            obj = next(self._get_tmdb_daily_export(type="person"))
-            yield {"tmdb_id": obj["id"], "title": obj["name"], "popularity": obj["popularity"]}
-
-            batched_movie_list = []
-        for obj in next(self._get_tmdb_daily_export(type="person")):
-            batch_data = {
-                "tmdb_id": obj["id"],
-                "title": obj["name"],
-                "popularity": obj["popularity"],
-            }
-            batched_movie_list.append(batch_data)
-            if len(batched_movie_list) == batch_size:
-                yield batched_movie_list
-                batched_movie_list = []
-
     def _generate_movie_record_from_response(self, movie_data: Dict[str, Any]) -> MovieRecord:
-        return MovieRecord(
-            record_name=movie_data["title"],
-            record_id=movie_data["id"],
-            is_adult=movie_data["adult"],
-            backdrop_path=movie_data["backdrop_path"],
-            poster_path=movie_data["poster_path"],
-            genre_ids=movie_data["genre_ids"],
-            language=movie_data["original_language"],
-            description=movie_data["overview"],
-            release_date=movie_data["release_date"],
-            vote_avg=movie_data["vote_average"],
-            vote_count=movie_data["vote_count"],
-        )
+        return MovieRecord(**movie_data)
 
     def _generate_series_record_from_response(self, series_data: Dict[str, Any]) -> SeriesRecord:
-        pass
+        return SeriesRecord(**series_data)
 
     def _generate_artist_record_from_response(self, artist_data: Dict[str, Any]) -> ArtistRecord:
-        pass
+        return ArtistRecord(**artist_data)
+
+    def _get_popular_n(self, num_records: int, record_type: RecordType):
+        url = f"{self.URL_BASE}/{record_type.value.lower()}/popular?api_key={self.AUTH_TOKEN}&page="
+        page = 1
+        data = []
+        while len(data < num_records):
+            response = requests.get(url + str(page))
+            data = response.json()
+            for item_data in data["results"]:
+                if record_type == RecordType.MOVIE:
+                    item_data = self._generate_movie_record_from_response(item_data)
+                elif record_type == RecordType.SERIES:
+                    item_data = self._generate_artist_record_from_response(item_data)
+                elif record_type == RecordType.ARTIST:
+                    item_data = self._generate_artist_record_from_response(item_data)
+                else:
+                    raise ValueError(f"Unsupported record type: {record_type}")
+                data.append(item_data)
+
+            if data["page"] == data["total_pages"]:
+                break
+            page += 1
+            time.sleep(2)
+
+        return data
+
+    def get_movie_details(self, tmdb_id: int):
+        data = self._get_record_details(RecordType.MOVIE, tmdb_id)
+        ipdb.set_trace()
+        return self._generate_movie_record_from_response(data)
+
+    def get_series_details(self, tmdb_id: int):
+        data = self._get_record_details(RecordType.SERIES, tmdb_id)
+        ipdb.set_trace()
+        return self._generate_series_record_from_response(data)
+
+    def get_artist_details(self, tmdb_id: int):
+        data = self._get_record_details(RecordType.ARTIST, tmdb_id)
+        ipdb.set_trace()
+        return self._generate_artist_record_from_response(data)
+
+    def get_popular_n_movies(self, num_records: int) -> List[MovieRecord]:
+        return self._get_popular_n(num_records, record_type=RecordType.MOVIE)
+
+    def get_popular_n_series(self, num_records: int) -> List[SeriesRecord]:
+        return self._get_popular_n(num_records, record_type=RecordType.SERIES)
+
+    def get_popular_n_artists(self, num_records: int) -> List[ArtistRecord]:
+        return self._get_popular_n(num_records, record_type=RecordType.ARTIST)
 
     def get_most_popular_movies(self) -> List[MovieRecord]:
         """
@@ -152,7 +196,7 @@ class TmdbConnector(ConnectorBase):
         Returns:
             List[MovieRecord]: List of MovieRecord objects
         """
-        url = f"{self.URL_BASE}/movie/popular?api_key={self.AUTH_TOKEN}"
+        url = f"{self.URL_BASE}/{RecordType.MOVIE.name.lower()}/popular?api_key={self.AUTH_TOKEN}"
         data = self._make_request(url)
         movie_record_list = []
         for movie_data in data["results"]:
@@ -160,50 +204,38 @@ class TmdbConnector(ConnectorBase):
             movie_record_list.append(movie_record)
         return movie_record_list
 
-    def get_popular_movies(self, num_records: int) -> List[MovieRecord]:
-        url = f"{self.URL_BASE}/movie/popular?api_key={self.AUTH_TOKEN}&page="
+    def get_most_popular_series(self) -> List[SeriesRecord]:
+        """
+        Function that returns the series records of top 20 popular series
+        Returns:
+            List[SeriesRecord]: List of SeriesRecord objects
+        """
+        url = f"{self.URL_BASE}/{RecordType.SERIES.name.lower()}/popular?api_key={self.AUTH_TOKEN}"
+        data = self._make_request(url)
+        series_record_list = []
+        for series_data in data["results"]:
+            series_record = self._generate_series_record_from_response(series_data)
+            series_record_list.append(series_record)
+        return series_record_list
 
-        page = 1
-        movies = []
-        while len(movies < num_records):
-            response = requests.get(url + str(page))
-            data = response.json()
-            movies.extend(
-                [
-                    self._generate_movie_record_from_response(movie_data)
-                    for movie_data in data["results"]
-                ]
-            )
-            if data["page"] == data["total_pages"]:
-                break
-            page += 1
-            time.sleep(5)
-
-        return movies
-
-    def get_movie_details(self, tmdb_id: int):
-        data = self._get_record_details(RecordType.MOVIE, tmdb_id)
-        return {
-            "name": data["title"],
-            "id": data["id"],
-            "overview": data["overview"],
-            "release_date": data["release_date"],
-            "popularity": data["popularity"],
-        }
-
-    def get_series_details(self, tmdb_id: int):
-        data = self._get_record_details(RecordType.SERIES, tmdb_id)
-
-    def get_most_popular_series(self):
-        pass
-
-    def get_popular_series(self, num_records: int) -> List[SeriesRecord]:
-        pass
+    def get_most_popular_artists(self) -> List[ArtistRecord]:
+        """
+        Function that returns the artist records of top 20 popular artists
+        Returns:
+            List[ArtistRecord]: List of SeriesRecord objects
+        """
+        url = f"{self.URL_BASE}/{RecordType.ARTIST.name.lower()}/popular?api_key={self.AUTH_TOKEN}"
+        data = self._make_request(url)
+        artist_record_list = []
+        for artist_data in data["results"]:
+            artist_record = self._generate_artist_record_from_response(artist_data)
+            artist_record_list.append(artist_record)
+        return artist_record_list
 
 
 if __name__ == "__main__":
     import ipdb
 
     connector = TmdbConnector()
-    pop_movies = connector.get_most_popular_movies()
+    connector.get_artist_details(tmdb_id=1253360)
     ipdb.set_trace()

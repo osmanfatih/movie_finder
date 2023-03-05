@@ -4,7 +4,7 @@ import abc
 class ConnectorBase(abc.ABC):
     """
     Connector base class. From this base, we will
-    connector objects for TMDB, Elasticsearch, and RapidApi
+    connector objects for TMDB, Supabase, and RapidApi
     """
 
     @classmethod

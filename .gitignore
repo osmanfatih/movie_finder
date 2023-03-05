@@ -3,3 +3,4 @@
 *.toml
 *.egg-info/
 *.pyc
+.DS_STORE
